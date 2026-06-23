@@ -47,6 +47,9 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader ||
 
 export HF_HUB_ENABLE_HF_TRANSFER=1
 export PIP_ROOT_USER_ACTION=ignore
+# Skip the FlashInfer GDN linear-attention prefill JIT compile (hangs on first
+# run for this qwen3_5 hybrid-mamba model); use the triton backend instead.
+export VLLM_GDN_PREFILL_BACKEND=triton
 PY=python3
 $PY -m pip install --quiet --upgrade pip hf-transfer 2>&1 | tail -2
 

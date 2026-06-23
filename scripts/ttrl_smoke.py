@@ -29,9 +29,12 @@ def main():
     # (c) actually load + generate (the real gate)
     if ok:
         try:
+            # gdn_prefill_backend=triton: skip FlashInfer GDN-prefill JIT compile
+            # which hangs nondeterministically on first run for this hybrid model.
             llm = LLM(model=model_id, trust_remote_code=True,
                       max_model_len=2048, gpu_memory_utilization=0.85,
-                      enforce_eager=True, dtype="bfloat16")
+                      enforce_eager=True, dtype="bfloat16",
+                      gdn_prefill_backend="triton")
             out = llm.generate(["What is 12*12? Answer:"],
                                SamplingParams(temperature=0.0, max_tokens=32))
             print("GEN_OK:", repr(out[0].outputs[0].text[:120]))
