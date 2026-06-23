@@ -33,7 +33,7 @@ log()  { echo "[run.sh $(date +%H:%M:%S)] $*"; }
 fail() { echo "FAILED: $*" | tee -a "$ART/status.txt"; cp -f "$ART/EVAL.md" EVAL.md 2>/dev/null || true; exit 1; }
 
 # Always leave an EVAL.md so the run is interpretable even on early exit.
-write_eval() { cp -f "$1" EVAL.md; cp -f "$1" "$ART/EVAL.md"; }
+write_eval() { cp -f "$1" EVAL.md; [ "$1" != "$ART/EVAL.md" ] && cp -f "$1" "$ART/EVAL.md" || true; }
 cat > "$ART/EVAL.md" <<EOF
 # TTRL on ${MODEL_ID} — in progress
 Run started; no results yet. See \`status.txt\` and \`smoke.txt\` for stage progress.
@@ -63,38 +63,8 @@ $PY -m pip install --quiet "transformers>=4.57" accelerate "numpy<2.0.0" 2>&1 | 
 $PY -m pip install --quiet --pre vllm \
   --extra-index-url https://wheels.vllm.ai/nightly 2>&1 | tail -5
 
-log "verify qwen3_5 is in transformers + vLLM registries, then load+generate"
-$PY - "$MODEL_ID" <<'PYEOF' 2>&1 | tee "$ART/smoke.txt"
-import sys, traceback
-model_id = sys.argv[1]
-ok = True
-# (a) transformers knows the arch?
-try:
-    from transformers import AutoConfig
-    cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-    print("transformers config OK:", type(cfg).__name__, "model_type=", getattr(cfg, "model_type", "?"))
-except Exception:
-    ok = False; traceback.print_exc()
-# (b) vLLM registry knows the arch?
-try:
-    from vllm import LLM, SamplingParams
-    import vllm; print("vllm version:", vllm.__version__)
-except Exception:
-    ok = False; traceback.print_exc()
-# (c) actually load + generate (the real gate)
-if ok:
-    try:
-        llm = LLM(model=model_id, trust_remote_code=True,
-                  max_model_len=2048, gpu_memory_utilization=0.85,
-                  enforce_eager=True, dtype="bfloat16")
-        out = llm.generate(["What is 12*12? Answer:"],
-                           SamplingParams(temperature=0.0, max_tokens=32))
-        print("GEN_OK:", repr(out[0].outputs[0].text[:120]))
-        print("SMOKE_PASS")
-    except Exception:
-        ok = False; traceback.print_exc()
-sys.exit(0 if ok else 17)
-PYEOF
+log "verify qwen3_5 loads in vLLM, then generate (run from a FILE so vLLM spawn works)"
+$PY scripts/ttrl_smoke.py "$MODEL_ID" 2>&1 | tee "$ART/smoke.txt"
 SMOKE_RC=${PIPESTATUS[0]}
 if [ "$SMOKE_RC" -ne 0 ] || ! grep -q SMOKE_PASS "$ART/smoke.txt"; then
   cat > "$ART/EVAL.md" <<EOF
