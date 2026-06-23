@@ -115,10 +115,10 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     data = json.load(open(args.data))
+    # Raw text prompt (NO chat template) — this is a base/pretrained model, and
+    # it must match the eval prompt format exactly for a fair before/after.
     def fmt(d):
-        msg = [{"role": "user", "content": d["prompt"] +
-                "\nPlease reason step by step, and put your final answer within \\boxed{}."}]
-        return tok.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+        return d["prompt"] + "\nPlease reason step by step, and put your final answer within \\boxed{}."
 
     log = []
     G = args.group_size
