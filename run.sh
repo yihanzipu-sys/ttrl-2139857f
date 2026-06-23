@@ -122,46 +122,24 @@ run_eval "$MODEL_ID" "base" "$ART/eval_base.json" || fail "baseline eval failed"
 
 # =============================================================================
 # STAGE 3: train — TTRL GRPO (majority-vote rewards, NO ground truth), re-eval.
+# Self-contained HF-transformers trainer (verl's vLLM rollout is incompatible
+# with vLLM 0.23 for qwen3_5). Same TTRL mechanism: vote -> binary reward -> GRPO.
 # =============================================================================
-log "STAGE train: install verl training stack"
-$PY -m pip install --quiet ray codetiming hydra-core tensordict pylatexenc \
-    "latex2sympy2_extended" "math-verify" liger-kernel dill torchdata 2>&1 | tail -3
-$PY -m pip install --quiet -e verl 2>&1 | tail -3
-
-OUTDIR="$ROOT/ttrl_ckpt"
-log "STAGE train: launch TTRL trainer"
-bash scripts/ttrl_train.sh "$MODEL_ID" "$OUTDIR" 2>&1 | tee "$ART/train.log" | tail -40
+HFDIR="$ROOT/ttrl_ckpt_hf"
+log "STAGE train: standalone TTRL GRPO (no verl)"
+$PY scripts/ttrl_grpo.py --model "$MODEL_ID" \
+    --data verl/data/AIME-TTT/train.json \
+    --out "$HFDIR" --artifacts "$ART" \
+    --steps "${TTRL_STEPS:-40}" --group-size 8 --prompts-per-step 4 \
+    --max-new-tokens 1024 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -60
 TRAIN_RC=${PIPESTATUS[0]}
-if [ "$TRAIN_RC" -ne 0 ]; then
-  log "training returned non-zero ($TRAIN_RC); see train.log"
-fi
+[ "$TRAIN_RC" -ne 0 ] && log "training returned non-zero ($TRAIN_RC); see train.log"
 
-# Merge the latest FSDP checkpoint to HF format, then re-eval the TTRL model.
-STEP_DIR=$(ls -d "$OUTDIR"/global_step_*/actor 2>/dev/null | sort -V | tail -1)
-if [ -n "$STEP_DIR" ]; then
-  HFDIR="$OUTDIR/hf_merged"
-  log "merge FSDP checkpoint $STEP_DIR -> $HFDIR"
-  $PY -m verl.model_merger merge --backend fsdp \
-      --local_dir "$STEP_DIR" --target_dir "$HFDIR" 2>&1 | tail -10
-  # vLLM needs tokenizer/processor files alongside weights; copy from base if missing.
-  for f in tokenizer.json tokenizer_config.json vocab.json merges.txt config.json \
-           preprocessor_config.json video_preprocessor_config.json generation_config.json; do
-    [ -f "$HFDIR/$f" ] || $PY - "$MODEL_ID" "$HFDIR" "$f" <<'PYEOF' 2>/dev/null || true
-import sys, shutil
-from huggingface_hub import hf_hub_download
-mid, dst, fn = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    p = hf_hub_download(mid, fn); shutil.copy(p, dst + "/" + fn); print("copied", fn)
-except Exception as e:
-    pass
-PYEOF
-  done
-  if [ -d "$HFDIR" ] && [ -n "$(ls -A "$HFDIR" 2>/dev/null)" ]; then
-    log "STAGE eval: TTRL-trained model at $HFDIR"
-    run_eval "$HFDIR" "ttrl" "$ART/eval_ttrl.json" || log "ttrl eval failed"
-  fi
+if [ -f "$HFDIR/config.json" ]; then
+  log "STAGE eval: TTRL-trained model at $HFDIR"
+  run_eval "$HFDIR" "ttrl" "$ART/eval_ttrl.json" || log "ttrl eval failed"
 else
-  log "no FSDP checkpoint found; EVAL will report training-only signal from train.log"
+  log "no TTRL checkpoint saved; see train.log"
 fi
 
 # =============================================================================

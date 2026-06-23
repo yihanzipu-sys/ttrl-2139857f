@@ -10,6 +10,7 @@ def load(name):
 
 base = load("eval_base.json")
 ttrl = load("eval_ttrl.json")
+tlog = load("train_log.json")
 
 lines = ["# TTRL reproduction — Qwen/Qwen3.5-0.8B-Base on AIME\n"]
 lines.append("Test-Time RL (arXiv:2504.16084): majority-vote pseudo-labels -> GRPO, "
@@ -35,6 +36,19 @@ else:
         lines.append(f"\n**Verdict:** {verdict}.")
     else:
         lines.append("\n_TTRL-trained eval not present yet (training stage incomplete)._")
+
+if tlog:
+    lines.append("\n## TTRL training curve (label-free signal)\n")
+    lines.append("| step | mean_reward | label_accuracy | gt_pass@1 | maj_ratio |")
+    lines.append("|---|---|---|---|---|")
+    show = tlog[:: max(1, len(tlog) // 12)]
+    for r in show:
+        lines.append(f"| {r['step']} | {r.get('mean_reward')} | "
+                     f"{r.get('label_accuracy')} | {r.get('gt_pass@1')} | {r.get('majority_ratio')} |")
+    first, last = tlog[0], tlog[-1]
+    dg = last.get("gt_pass@1", 0) - first.get("gt_pass@1", 0)
+    lines.append(f"\nTrain gt_pass@1: {first.get('gt_pass@1')} -> {last.get('gt_pass@1')} "
+                 f"(Δ {round(dg,3)}) over {len(tlog)} steps.")
 
 print("\n".join(lines))
 with open(os.path.join(art, "EVAL.md"), "w") as f:
