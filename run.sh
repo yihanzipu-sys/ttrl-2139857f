@@ -56,7 +56,10 @@ $PY -m pip install --quiet --upgrade pip hf-transfer 2>&1 | tail -2
 log "STAGE smoke: installing minimal inference stack (transformers + vLLM nightly)"
 
 # transformers new enough to know qwen3_5; let pip resolve a compatible torch.
-$PY -m pip install --quiet "transformers>=4.57" accelerate "numpy<2.0.0" 2>&1 | tail -3
+# Also light deps needed by preprocess (datasets/pandas/pyarrow) and the
+# standalone evaluator's grader (math_verify) — none pull torch.
+$PY -m pip install --quiet "transformers>=4.57" accelerate "numpy<2.0.0" \
+  datasets pandas "pyarrow>=15.0.0" math-verify latex2sympy2_extended 2>&1 | tail -3
 
 # vLLM nightly carries Qwen3_5ForConditionalGeneration in its model registry.
 # Prebuilt wheel (no source compile) from the nightly index.

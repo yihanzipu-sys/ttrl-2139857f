@@ -4,10 +4,44 @@
 Reuses the repo's math grader + majority-vote answer extraction so the numbers
 are computed exactly the same way TTRL computes its pseudo-labels / rewards.
 """
-import argparse, json, os, sys, collections
+import argparse, json, os, re, collections
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "verl"))
-from verl.utils.reward_score.ttrl_math import extract_answer, grade  # type: ignore
+# Self-contained grader using math_verify (same library the TTRL repo uses for
+# grading) so eval does NOT import the heavy `verl` package (pandas/tensordict).
+from math_verify import parse as mv_parse, verify as mv_verify
+
+
+def extract_answer(passage):
+    if passage is None or "\\boxed" not in passage:
+        return None
+    # extract the content of the LAST \boxed{...}, balancing braces
+    idx = passage.rfind("\\boxed")
+    i = passage.find("{", idx)
+    if i == -1:
+        return None
+    depth, j = 0, i
+    while j < len(passage):
+        if passage[j] == "{":
+            depth += 1
+        elif passage[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return passage[i + 1:j]
+        j += 1
+    return None
+
+
+def grade(model_answer, gt_answer):
+    if model_answer is None:
+        return False
+    ma, gt = str(model_answer).strip(), str(gt_answer).strip()
+    if ma == gt:
+        return True
+    try:
+        # math_verify compares mathematically (handles 025==25, fractions, etc.)
+        return bool(mv_verify(mv_parse("$" + gt + "$"), mv_parse("$" + ma + "$")))
+    except Exception:
+        return False
 
 
 def majority(answers):
