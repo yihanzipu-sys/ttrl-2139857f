@@ -85,16 +85,23 @@ def main():
     dev = "cuda"
     os.makedirs(args.artifacts, exist_ok=True)
 
+    # cuDNN SDPA backend rejects qwen3_5's head_dim=256 ("No valid execution
+    # plans built"); force eager attention + disable cuDNN SDPA to be safe.
+    torch.backends.cuda.enable_cudnn_sdp(False)
+    attn_impl = "eager"
+
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, trust_remote_code=True, dtype=torch.bfloat16).to(dev)
+        args.model, trust_remote_code=True, dtype=torch.bfloat16,
+        attn_implementation=attn_impl).to(dev)
     model.gradient_checkpointing_enable()
     model.config.use_cache = False
     # frozen reference for KL
     ref = AutoModelForCausalLM.from_pretrained(
-        args.model, trust_remote_code=True, dtype=torch.bfloat16).to(dev)
+        args.model, trust_remote_code=True, dtype=torch.bfloat16,
+        attn_implementation=attn_impl).to(dev)
     ref.eval()
     for p in ref.parameters():
         p.requires_grad_(False)
