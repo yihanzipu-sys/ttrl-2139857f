@@ -25,9 +25,9 @@ set -uo pipefail
 
 MODEL_ID="Qwen/Qwen3.5-0.8B-Base"
 STAGE="${STAGE:-all}"
-# Benchmark: MATH-L1 (easiest tier, 43 problems) — a 0.8B model has enough prior
-# here for majority voting to produce signal (AIME is too hard: no consensus).
-TASK="${TASK:-MATH-L1-TTT}"
+# Benchmark: MATH-L5 (hardest tier, 134 problems) — low base pass@1 leaves large
+# headroom while maj@n still gives usable consensus: the paper's huge-gain regime.
+TASK="${TASK:-MATH-L5-TTT}"
 ART=".openresearch/artifacts"
 mkdir -p "$ART"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
