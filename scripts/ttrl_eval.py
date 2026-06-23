@@ -73,8 +73,10 @@ def main():
     gts = [str(d["answer"]) for d in data]
 
     from vllm import LLM, SamplingParams
+    # text-only: skip VLM dummy multimodal profiling (hangs) and forbid mm inputs.
     llm = LLM(model=args.model, trust_remote_code=True, max_model_len=args.max_tokens + 1024,
-              gpu_memory_utilization=0.85, enforce_eager=False, dtype="bfloat16")
+              gpu_memory_utilization=0.85, enforce_eager=True, dtype="bfloat16",
+              skip_mm_profiling=True, limit_mm_per_prompt={"image": 0, "video": 0})
     sp = SamplingParams(n=args.n, temperature=args.temperature, top_p=args.top_p,
                         max_tokens=args.max_tokens)
     outs = llm.generate(prompts, sp)

@@ -29,9 +29,13 @@ def main():
     # (c) actually load + generate (the real gate)
     if ok:
         try:
+            # text-only: skip the expensive VLM dummy multimodal profiling
+            # (which hangs for this 262k-context VLM) and forbid mm inputs.
             llm = LLM(model=model_id, trust_remote_code=True,
                       max_model_len=2048, gpu_memory_utilization=0.85,
-                      enforce_eager=True, dtype="bfloat16")
+                      enforce_eager=True, dtype="bfloat16",
+                      skip_mm_profiling=True,
+                      limit_mm_per_prompt={"image": 0, "video": 0})
             out = llm.generate(["What is 12*12? Answer:"],
                                SamplingParams(temperature=0.0, max_tokens=32))
             print("GEN_OK:", repr(out[0].outputs[0].text[:120]))
