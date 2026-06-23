@@ -213,6 +213,15 @@ def main():
               f"maj_ratio={rec['majority_ratio']}", flush=True)
         json.dump(log, open(os.path.join(args.artifacts, "train_log.json"), "w"), indent=2)
 
+        # Periodic save so a partial run (instance time limit) still yields an
+        # evaluable TTRL checkpoint.
+        if (step + 1) % 5 == 0 or step == args.steps - 1:
+            model.config.use_cache = True
+            model.save_pretrained(args.out)
+            tok.save_pretrained(args.out)
+            model.config.use_cache = False
+            print(f"[ckpt] saved at step {step} -> {args.out}", flush=True)
+
     model.config.use_cache = True
     model.save_pretrained(args.out)
     tok.save_pretrained(args.out)

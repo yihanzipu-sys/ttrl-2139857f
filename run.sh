@@ -78,7 +78,11 @@ $PY -m pip install --quiet --pre vllm \
 # them every iteration just burns GPU. Set FAST_TRAIN=0 to do the full pipeline.
 # Default OFF here: MATH-L1 is a new benchmark, so measure its real baseline
 # (the AIME baseline doesn't apply) then train then re-eval on the same set.
-FAST_TRAIN="${FAST_TRAIN:-0}"
+# L1 baseline already measured (pass@1=76.6, maj@16=90.7) — reuse it and jump
+# straight to training so the run finishes within the instance's time budget.
+FAST_TRAIN="${FAST_TRAIN:-1}"
+BASE_PASS1="${BASE_PASS1:-76.6}"
+BASE_MAJ="${BASE_MAJ:-90.7}"
 
 if [ "$FAST_TRAIN" = "1" ]; then
   log "FAST_TRAIN=1: skipping smoke gate + baseline eval (already established)"
@@ -133,7 +137,7 @@ log "STAGE train: standalone TTRL GRPO (no verl) — test-time RL on ${TASK} tes
 $PY -u scripts/ttrl_grpo.py --model "$MODEL_ID" \
     --data "$TEST_JSON" \
     --out "$HFDIR" --artifacts "$ART" \
-    --steps "${TTRL_STEPS:-60}" --group-size 8 --prompts-per-step 8 \
+    --steps "${TTRL_STEPS:-20}" --group-size 8 --prompts-per-step 8 \
     --max-new-tokens 1024 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -80
 TRAIN_RC=${PIPESTATUS[0]}
 [ "$TRAIN_RC" -ne 0 ] && log "training returned non-zero ($TRAIN_RC); see train.log"
