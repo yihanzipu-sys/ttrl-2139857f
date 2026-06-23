@@ -146,11 +146,11 @@ fi
 # =============================================================================
 HFDIR="$ROOT/ttrl_ckpt_hf"
 log "STAGE train: standalone TTRL GRPO (no verl)"
-$PY scripts/ttrl_grpo.py --model "$MODEL_ID" \
+$PY -u scripts/ttrl_grpo.py --model "$MODEL_ID" \
     --data verl/data/AIME-TTT/train.json \
     --out "$HFDIR" --artifacts "$ART" \
-    --steps "${TTRL_STEPS:-40}" --group-size 8 --prompts-per-step 4 \
-    --max-new-tokens 1024 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -60
+    --steps "${TTRL_STEPS:-30}" --group-size 8 --prompts-per-step 4 \
+    --max-new-tokens 640 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -80
 TRAIN_RC=${PIPESTATUS[0]}
 [ "$TRAIN_RC" -ne 0 ] && log "training returned non-zero ($TRAIN_RC); see train.log"
 

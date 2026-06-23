@@ -90,14 +90,20 @@ def main():
     torch.backends.cuda.enable_cudnn_sdp(False)
     attn_impl = "eager"
 
+    import time
+    t0 = time.time()
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
+    print(f"[load] tokenizer {time.time()-t0:.1f}s", flush=True)
+    t0 = time.time()
     model = AutoModelForCausalLM.from_pretrained(
         args.model, trust_remote_code=True, dtype=torch.bfloat16,
         attn_implementation=attn_impl).to(dev)
     model.gradient_checkpointing_enable()
     model.config.use_cache = False
+    print(f"[load] policy {time.time()-t0:.1f}s  type={type(model).__name__}", flush=True)
+    t0 = time.time()
     # frozen reference for KL
     ref = AutoModelForCausalLM.from_pretrained(
         args.model, trust_remote_code=True, dtype=torch.bfloat16,
@@ -105,6 +111,7 @@ def main():
     ref.eval()
     for p in ref.parameters():
         p.requires_grad_(False)
+    print(f"[load] ref {time.time()-t0:.1f}s", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     data = json.load(open(args.data))
@@ -121,6 +128,8 @@ def main():
         gts = [str(d["answer"]) for d in batch]
 
         # ---- 1. sample G rollouts per prompt ----
+        import time as _t
+        _g0 = _t.time()
         model.eval()
         all_seq, all_promptlen, group_rewards, group_meta = [], [], [], []
         with torch.no_grad():
@@ -147,6 +156,8 @@ def main():
                 group_meta.append({"pseudo": pseudo, "ratio": ratio,
                                     "gt_acc": gt_acc, "label_ok": label_ok,
                                     "mean_r": sum(rewards) / G})
+                print(f"[step {step}] rollout prompt {pi+1}/{len(prompts)} "
+                      f"({_t.time()-_g0:.1f}s elapsed)", flush=True)
 
         # ---- 4. GRPO advantages (group-normalized) ----
         advs = []
