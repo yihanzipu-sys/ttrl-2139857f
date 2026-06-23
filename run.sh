@@ -25,6 +25,9 @@ set -uo pipefail
 
 MODEL_ID="Qwen/Qwen3.5-0.8B-Base"
 STAGE="${STAGE:-all}"
+# Benchmark: MATH-L1 (easiest tier, 43 problems) — a 0.8B model has enough prior
+# here for majority voting to produce signal (AIME is too hard: no consensus).
+TASK="${TASK:-MATH-L1-TTT}"
 ART=".openresearch/artifacts"
 mkdir -p "$ART"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -73,7 +76,9 @@ $PY -m pip install --quiet --pre vllm \
 # baseline eval, jumping straight to TTRL training. The qwen3_5 vLLM stack and
 # the base AIME numbers (pass@1=1.67, maj@16=6.67) are established; re-running
 # them every iteration just burns GPU. Set FAST_TRAIN=0 to do the full pipeline.
-FAST_TRAIN="${FAST_TRAIN:-1}"
+# Default OFF here: MATH-L1 is a new benchmark, so measure its real baseline
+# (the AIME baseline doesn't apply) then train then re-eval on the same set.
+FAST_TRAIN="${FAST_TRAIN:-0}"
 
 if [ "$FAST_TRAIN" = "1" ]; then
   log "FAST_TRAIN=1: skipping smoke gate + baseline eval (already established)"
@@ -96,45 +101,23 @@ EOF
 fi
 
 # =============================================================================
-# Data prep: AIME-TTT json -> parquet (verl format). Tiny (30 problems).
+# Eval helper — vLLM pass@1/maj@n on the TASK test set. The CONTROL + treatment.
+# (No parquet preprocessing needed; the standalone trainer/eval read the json.)
 # =============================================================================
-log "preprocess AIME-TTT -> parquet"
-$PY - <<'PYEOF' 2>&1 | tail -5
-import os, datasets
-src = "verl/data/AIME-TTT"
-def mk(split):
-    def fn(ex, idx):
-        return {"data_source":"aime",
-                "prompt":[{"role":"user","content":ex["prompt"]+"\nPlease reason step by step, and put your final answer within \\boxed{}."}],
-                "ability":"math",
-                "reward_model":{"style":"rule","ground_truth":ex["answer"]},
-                "extra_info":{"split":split,"index":f"aime-{idx}"}}
-    return fn
-for split,f in [("train","train.json"),("test","test.json")]:
-    ds = datasets.load_dataset("json", data_files=os.path.join(src,f), split="train")
-    ds = ds.map(mk(split), with_indices=True, remove_columns=ds.column_names)
-    ds.to_parquet(os.path.join(src, f.replace(".json",".parquet")))
-    print(split, len(ds), "->", os.path.join(src, f.replace('.json','.parquet')))
-PYEOF
-
-# =============================================================================
-# STAGE 2: eval — baseline (no-TTRL) pass@1 / maj@n via vLLM. The CONTROL.
-# This is also the metric we reuse after training (treatment).
-# =============================================================================
+TEST_JSON="verl/data/${TASK}/test.json"
+log "TASK=${TASK}  test set: ${TEST_JSON}"
 run_eval () {  # $1 = model path/id, $2 = label, $3 = out json
   $PY scripts/ttrl_eval.py --model "$1" --label "$2" --out "$3" \
-      --data verl/data/AIME-TTT/test.json --n 16 --max-tokens 3072 2>&1 | tail -20
+      --data "$TEST_JSON" --n 16 --max-tokens 1024 2>&1 | tail -20
 }
 
 if [ "$FAST_TRAIN" = "1" ]; then
-  # Seed the already-measured baseline (reproduced twice via vLLM eval) so the
-  # report still shows the base-vs-TTRL comparison without re-running it.
-  log "FAST_TRAIN=1: seeding known baseline (pass@1=1.67, maj@16=6.67)"
+  log "FAST_TRAIN=1: reusing seeded baseline from \$BASE_PASS1/\$BASE_MAJ"
   cat > "$ART/eval_base.json" <<EOF
-{"label":"base","model":"${MODEL_ID}","n_samples":16,"n_problems":30,"pass@1":1.67,"maj@16":6.67,"per_problem":[]}
+{"label":"base","model":"${MODEL_ID}","n_samples":16,"n_problems":0,"pass@1":${BASE_PASS1:-0},"maj@16":${BASE_MAJ:-0},"per_problem":[]}
 EOF
 else
-  log "STAGE eval: baseline (untrained ${MODEL_ID})"
+  log "STAGE eval: baseline (untrained ${MODEL_ID}) on ${TASK}"
   run_eval "$MODEL_ID" "base" "$ART/eval_base.json" || fail "baseline eval failed"
   [ "$STAGE" = "eval" ] && { log "stopping after eval (STAGE=eval)"; $PY scripts/ttrl_report.py "$ART"; write_eval "$ART/EVAL.md"; exit 0; }
 fi
@@ -145,12 +128,13 @@ fi
 # with vLLM 0.23 for qwen3_5). Same TTRL mechanism: vote -> binary reward -> GRPO.
 # =============================================================================
 HFDIR="$ROOT/ttrl_ckpt_hf"
-log "STAGE train: standalone TTRL GRPO (no verl)"
+log "STAGE train: standalone TTRL GRPO (no verl) — test-time RL on ${TASK} test set"
+# TTRL = test-time RL: train (label-free) on the SAME test set we evaluate.
 $PY -u scripts/ttrl_grpo.py --model "$MODEL_ID" \
-    --data verl/data/AIME-TTT/train.json \
+    --data "$TEST_JSON" \
     --out "$HFDIR" --artifacts "$ART" \
-    --steps "${TTRL_STEPS:-30}" --group-size 8 --prompts-per-step 4 \
-    --max-new-tokens 640 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -80
+    --steps "${TTRL_STEPS:-60}" --group-size 8 --prompts-per-step 8 \
+    --max-new-tokens 1024 --lr 1e-6 --kl-coef 0.0 2>&1 | tee "$ART/train.log" | tail -80
 TRAIN_RC=${PIPESTATUS[0]}
 [ "$TRAIN_RC" -ne 0 ] && log "training returned non-zero ($TRAIN_RC); see train.log"
 
