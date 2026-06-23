@@ -67,12 +67,12 @@ python -m verl.trainer.main_ppo \
   ttrl.enable=True \
   ttrl.n_votes_per_prompt=$N_VOTES_PER_PROMPT \
   ttrl.n_samples_per_prompt=$N_SAMPLES_PER_PROMPT \
-  trainer.logger=['console','wandb'] \
+  trainer.logger=['console'] \
   trainer.project_name=TTRL-qwen35 \
   trainer.experiment_name="ttrl-qwen35-0.8b-aime" \
   trainer.n_gpus_per_node=1 \
   trainer.nnodes=1 \
-  trainer.save_freq=-1 \
+  trainer.save_freq="${TTRL_SAVE_FREQ:-10}" \
   trainer.test_freq=5 \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.default_local_dir="$OUTDIR" \

@@ -160,13 +160,32 @@ if [ "$TRAIN_RC" -ne 0 ]; then
   log "training returned non-zero ($TRAIN_RC); see train.log"
 fi
 
-# Re-eval the TTRL-trained model if a checkpoint exists.
-CKPT=$(ls -d "$OUTDIR"/hf_* 2>/dev/null | tail -1)
-if [ -n "$CKPT" ]; then
-  log "STAGE eval: TTRL-trained model at $CKPT"
-  run_eval "$CKPT" "ttrl" "$ART/eval_ttrl.json" || log "ttrl eval failed"
+# Merge the latest FSDP checkpoint to HF format, then re-eval the TTRL model.
+STEP_DIR=$(ls -d "$OUTDIR"/global_step_*/actor 2>/dev/null | sort -V | tail -1)
+if [ -n "$STEP_DIR" ]; then
+  HFDIR="$OUTDIR/hf_merged"
+  log "merge FSDP checkpoint $STEP_DIR -> $HFDIR"
+  $PY -m verl.model_merger merge --backend fsdp \
+      --local_dir "$STEP_DIR" --target_dir "$HFDIR" 2>&1 | tail -10
+  # vLLM needs tokenizer/processor files alongside weights; copy from base if missing.
+  for f in tokenizer.json tokenizer_config.json vocab.json merges.txt config.json \
+           preprocessor_config.json video_preprocessor_config.json generation_config.json; do
+    [ -f "$HFDIR/$f" ] || $PY - "$MODEL_ID" "$HFDIR" "$f" <<'PYEOF' 2>/dev/null || true
+import sys, shutil
+from huggingface_hub import hf_hub_download
+mid, dst, fn = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    p = hf_hub_download(mid, fn); shutil.copy(p, dst + "/" + fn); print("copied", fn)
+except Exception as e:
+    pass
+PYEOF
+  done
+  if [ -d "$HFDIR" ] && [ -n "$(ls -A "$HFDIR" 2>/dev/null)" ]; then
+    log "STAGE eval: TTRL-trained model at $HFDIR"
+    run_eval "$HFDIR" "ttrl" "$ART/eval_ttrl.json" || log "ttrl eval failed"
+  fi
 else
-  log "no HF checkpoint exported; EVAL will report training-only signal from W&B/train.log"
+  log "no FSDP checkpoint found; EVAL will report training-only signal from train.log"
 fi
 
 # =============================================================================
